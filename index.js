@@ -15,35 +15,7 @@ mongoose.connect(MONGODB_URI)
      console.log('error connecting to MongoDb', error.message)
  })
 
-/*let persons =[
-    {
-        name:"Arto Hellas",
-        phone:"040-123543",
-        street:"Tapiolankatu 5 A",
-        city:"Espoo",
-        id:"3d594650-3436-1e9-bc57-8b80ba54c431"
-    },
-    {
-        name:"Matti Luukkainen",
-        phone:"040-432342",
-        street:"Malminkaari 10 A",
-        city:"Helsinki",
-        id:'4d599471-3456-11e9-bc57-8b80ba5c431'
-    },
-    {
-        name:"Matti Luukkainen",
-        phone:"040-432346",
-        street:"Malminkaari 10 A",
-        city:"new your",
-        id:'4d599471-3472-11e9-bc57-8b80ba5c431'
-    },
-    {
-        name: "Venla Ruuska",
-        street: "Nallemäentie 22 C",
-        city: "Helsinki",
-        id: '3d599471-3436-11e9-bc57-8b80ba54c431'
-      },
-]*/
+
 const typeDefs = gql`
 type Address {
     street: String!
@@ -101,14 +73,27 @@ const resolvers = {
     Mutation: {
         addPerson:async(root,args) => {
            const person = new Person({...args})
-           return person.save()
-           
+           try{
+            await  person.save()
+           }catch(error){
+               throw new UserInputError(error.message,{
+                invalidArgs: args
+               })
+           }
+           return person      
         },
 
         editNumber:async (root,args) => {
             const person = await person.findOne({name: args.name})
             person.phone = args.phone
-            return person.save()
+            try{
+                await person.save()
+            }catch (error){
+                throw new UserInputError( error.message, {
+                    invalidArgs: args
+                })
+            }
+            return  person
         }
     }
 }
