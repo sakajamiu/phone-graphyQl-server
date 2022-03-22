@@ -60,6 +60,9 @@ type Mutation{
         username: String!
         passsword: String!
     ):Token
+    addASFriend(
+        name: String!
+    ):User
 }
 type Query {
     personCount: Int!
@@ -143,6 +146,20 @@ const resolvers = {
                 id: user._id,
             }
             return {value: jwt.sign(userForToken, process.env.SECRET)}
+        },
+        addAsFriend: async(root, args, { currentUser}) => {
+            const nonFriendAlready = (person) => 
+                !currentUser.friends.map( f => f._id.toString()).includes(person._id.toString())
+            
+            if(!currentUser){
+                throw new AuthenticationError("not authenticated")
+            }
+            const person = await Person.findOne({ name :args.name})
+            if (nonFriendAlready(person)){
+                currentUser.friends = currentUser.friends.concat(person)
+            }
+            await currentUser.save()
+            return currentUser
         },
     }
 }
