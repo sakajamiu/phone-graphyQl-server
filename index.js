@@ -6,6 +6,7 @@ const User = require('./models/user')
 require('dotenv').config()
 const {v1: uuid} = require('uuid')
 const jwt = require('jsonwebtoken')
+const JWT_SECRET = process.env.SECRET
 const MONGODB_URI = process.env.MONGODB_URI
 
 console.log('connecting to', MONGODB_URI)
@@ -58,7 +59,7 @@ type Mutation{
     ):User
     login(
         username: String!
-        passsword: String!
+        password: String!
     ):Token
     addASFriend(
         name: String!
@@ -137,17 +138,23 @@ const resolvers = {
         },
         login: async(root,args) => {
             const user = await User.findOne({username: args.username})
+            console.log(user)
+            console.log(args)
 
-            if(!user|| args.password!== 'Secret'){
-                throw new UserInputError ("Wrong Credentials")
+            if(!user|| args.password  !=='Secret'){
+                console.log('wrong credentials')
+                throw new UserInputError (error.message, {
+                    invalidArgs: "Wrong Credentials"
+                })
+                
             }
             const userForToken = {
                 username: user.username,
                 id: user._id,
             }
-            return {value: jwt.sign(userForToken, process.env.SECRET)}
+            return { value: jwt.sign(userForToken, JWT_SECRET) }
         },
-        addAsFriend: async(root, args, { currentUser}) => {
+        addASFriend: async(root, args, { currentUser}) => {
             const nonFriendAlready = (person) => 
                 !currentUser.friends.map( f => f._id.toString()).includes(person._id.toString())
             
@@ -170,7 +177,7 @@ const server = new ApolloServer({
         const auth = req ? req.headers.authorization : null
         if (auth && auth.toLowerCase().startsWith('bearer')){
             const decodedToken = jwt.verify(
-                auth.substring(7), process.env.SECRET
+                auth.substring(7), JWT_SECRET
             )
             const currentUser = await User.findById(decodedToken).populate('friends')
             return { currentUser }
