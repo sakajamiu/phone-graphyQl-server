@@ -1,12 +1,18 @@
-const {ApolloServer, UserInputError, gql} = require('apollo-server')
-const {ApolloServerPluginLandingPageGraphQLPlayground, AuthenticationError} = require('apollo-server-core')
-const mongoose = require('mongoose')
-const Person  = require('./models/persons')
+const { ApolloServerPluginLandingPageGraphQLPlayground, ApolloServerPluginDrainHttpServer } = require('apollo-server-core')
+const { ApolloServer } = require('apollo-server-express')
+const { makeExecutableSchema } = require('@graphql-tools/schema')
+const { execute , subscribe } = require('graphql')
+const {  SubscriptionServer } = require('subscriptions-transport-ws')
+const express  = require('express')
+const http  = require('http')
 const User = require('./models/user')
-require('dotenv').config()
-const {v1: uuid} = require('uuid')
+const mongoose = require('mongoose')
 const jwt = require('jsonwebtoken')
+const typeDefs = require('./schema')
+const resolvers = require('./resolvers')
 const JWT_SECRET = process.env.SECRET
+require('dotenv').config()
+
 const MONGODB_URI = process.env.MONGODB_URI
 
 console.log('connecting to', MONGODB_URI)
@@ -19,175 +25,55 @@ mongoose.connect(MONGODB_URI)
  })
 
 
-const typeDefs = gql`
-type Address {
-    street: String!
-    city: String!
-}
-enum YesNo{
-    YES
-    NO
-}
-type Person {
-    name: String!
-    phone: String
-    address: Address!
-    id:ID!
-
-}
-type User{
-    username: String!
-    friends: [Person!]!
-    id: ID!
-}
-type Token{
-    value: String!
-}
-type Mutation{
-    addPerson(
-        name: String!
-        phone: String
-        street: String!
-        city: String!
-    ):Person
-    editNumber(
-        phone: String!
-        name: String!
-    ):Person
-    createUser(
-        username: String!
-    ):User
-    login(
-        username: String!
-        password: String!
-    ):Token
-    addASFriend(
-        name: String!
-    ):User
-}
-type Query {
-    personCount: Int!
-    allPersons(phone: YesNo):[Person!]!
-    findPerson(name:String!):Person
-    me: User
-    
-}
-`
-const resolvers = {
-    Query:{
-        personCount:async()=>  Person.collection.countDocuments(),
-        allPersons:async(root, args)=>{
-            if(!args.phone){     
-            return Person.find({})
-            }
-            return Person.find({phone:{$exists: args.phone === 'YES'}})
+const start = async () =>{
+    const app = express()
+    const httpServer = http.createServer(app)
+    const schema = makeExecutableSchema({ typeDefs, resolvers })
+    const subscriptionServer = SubscriptionServer.create(
+        {
+            schema,
+            execute,
+            subscribe
         },
-        findPerson : async(root, args) =>
-             Person.findOne({name : args.name}),
-        me: async( root, args, context) =>{
-            return context.currentUser
+        {
+            server: httpServer,
+            path: ''
         }
-    },
-    Person:{
-        address:(root) =>{
-           return{
-            street: root.street,
-            city: root.city
-          }
-        }
-    },
-    Mutation: {
-        addPerson:async(root,args,context) => {
-           const person = new Person({...args})
-           const currentUser = context.currentUser
-           if(!currentUser){
-               throw new AuthenticationError("not authenticated")
-           }
-           try{
-            await  person.save()
-            currentUser.friends = currentUser.friends.concat(person)
-            await currentUser.save()
-           }catch(error){
-               throw new UserInputError(error.message,{
-                invalidArgs: args
-               })
-           }
-           return person      
+    )
+    const server = new ApolloServer({
+        schema,
+        context:async ({req}) => {
+            const auth = req ? req.headers.authorization : null
+            if (auth && auth.toLowerCase().startsWith('bearer')){
+                const decodedToken = jwt.verify(
+                    auth.substring(7), JWT_SECRET
+                )
+                const currentUser = await User.findById(decodedToken).populate('friends')
+                return { currentUser }
+            }
         },
+        plugins:[
+            ApolloServerPluginLandingPageGraphQLPlayground(),
+            ApolloServerPluginDrainHttpServer({ httpServer}),
+            {
+                async serverWillStart(){
+                    return{
+                        async drainServer(){
+                            SubscriptionServer.close()
+                        },
+                    }
 
-        editNumber:async (root,args) => {
-            const person = await Person.findOne({name: args.name})
-            person.phone = args.phone
-            try{
-                await person.save()
-            }catch (error){
-                throw new UserInputError( error.message, {
-                    invalidArgs: args
-                })
-            }
-            return  person
-        },
-        createUser: async(root,args) => {
-            const user = new User({ username  : args.username})
-            return user.save()
-             .catch(error => {
-                 throw new UserInputError(error.message, {
-                    invalidArgs : args
-                 })
-             })
-        },
-        login: async(root,args) => {
-            const user = await User.findOne({username: args.username})
-            console.log(user)
-            console.log(args)
-
-            if(!user|| args.password  !=='Secret'){
-                console.log('wrong credentials')
-                throw new UserInputError (error.message, {
-                    invalidArgs: "Wrong Credentials"
-                })
-                
-            }
-            const userForToken = {
-                username: user.username,
-                id: user._id,
-            }
-            return { value: jwt.sign(userForToken, JWT_SECRET) }
-        },
-        addASFriend: async(root, args, { currentUser}) => {
-            const nonFriendAlready = (person) => 
-                !currentUser.friends.map( f => f._id.toString()).includes(person._id.toString())
-            
-            if(!currentUser){
-                throw new AuthenticationError("not authenticated")
-            }
-            const person = await Person.findOne({ name :args.name})
-            if (nonFriendAlready(person)){
-                currentUser.friends = currentUser.friends.concat(person)
-            }
-            await currentUser.save()
-            return currentUser
-        },
-    }
+                },
+            },
+        ]
+    })
+    await server.start()
+    server.applyMiddleware({
+        app,
+        path:'/'
+    })
+    const PORT = 4000
+    httpServer.listen(PORT, () => console.log(`server is now running on http://localhost/${PORT}`))
 }
-const server = new ApolloServer({
-    typeDefs,
-    resolvers,
-    context:async ({req}) => {
-        const auth = req ? req.headers.authorization : null
-        if (auth && auth.toLowerCase().startsWith('bearer')){
-            const decodedToken = jwt.verify(
-                auth.substring(7), JWT_SECRET
-            )
-            const currentUser = await User.findById(decodedToken).populate('friends')
-            return { currentUser }
-        }
-    },
-    plugins:[
-        ApolloServerPluginLandingPageGraphQLPlayground(),
-    ]
-})
 
-server.listen().then(({url}) => {
-    console.log(`server ready at ${url}`)
-})
+start()
