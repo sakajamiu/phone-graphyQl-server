@@ -16,8 +16,9 @@ const resolvers = {
             }
             return Person.find({phone:{$exists: args.phone === 'YES'}})
         },
-        findPerson : async(root, args) =>
-             Person.findOne({name : args.name}),
+        findPerson : async(root, args) =>{
+            console.log(args.name)
+             return Person.findOne({name : args.name})},
         me: async( root, args, context) =>{
             return context.currentUser
         }

@@ -48,7 +48,8 @@ const start = async () =>{
                 const decodedToken = jwt.verify(
                     auth.substring(7), JWT_SECRET
                 )
-                const currentUser = await User.findById(decodedToken).populate('friends')
+                const currentUser = await User.findById(decodedToken.id).populate('friends')
+                console.log(currentUser)
                 return { currentUser }
             }
         },
